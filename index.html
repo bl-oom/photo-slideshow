@@ -81,7 +81,10 @@ input[type=file]{display:none}
 .shd b{background:linear-gradient(90deg,var(--a),var(--b));-webkit-background-clip:text;background-clip:text;color:transparent;font-size:16px}
 .okb{background:var(--go);color:#111;border:0}
 .mini{width:auto;height:36px;padding:0 14px}
-.picklist{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.picklist{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.picklist small{display:block;font:500 11px "Zen Kaku Gothic New",sans-serif;opacity:.75;margin-top:2px}
+.picklist button{flex-direction:column;height:auto;min-height:46px;padding:6px 8px}
+.addhint{color:var(--mute);font-size:12px;margin:0 2px}
 .picklist button.sel,.opt.sel,.qlist button.sel{background:linear-gradient(90deg,var(--a),var(--b));color:#fff;border:0;text-shadow:0 1px 2px #0005}
 #esheet{background:linear-gradient(var(--bg),var(--bg)) padding-box,linear-gradient(90deg,var(--a),var(--b)) border-box;border:1.5px solid transparent}
 .elab{color:var(--mute);font-size:12px;margin:2px 2px -2px;display:flex;justify-content:space-between}
@@ -135,13 +138,22 @@ input[type=file]{display:none}
 <div class="wrap">
 <div class="stage" id="stage">
   <canvas id="cv"></canvas>
-  <label class="empty" id="empty" for="file"><div><b>写真を選ぶ</b>ギャラリーやフォルダの写真をまとめて選べます（何枚でも）</div></label>
+  <button type="button" class="empty" id="empty" style="background:none;border:0;height:auto;width:auto;font:inherit"><div><b>写真を選ぶ</b>ギャラリー・ファイル・フォルダから、まとめて選べます（何枚でも）</div></button>
 </div>
 <div class="side">
   <h1>写真スライドショー</h1>
   <div class="sheet" id="pick" hidden>
     <div class="shd"><b id="pickT">選択</b><button id="pickX" class="okb mini">閉じる</button></div>
     <div class="picklist" id="pickL"></div>
+  </div>
+  <div class="sheet" id="asheet" hidden>
+    <div class="shd"><b>写真を追加</b><button id="aclose" class="okb mini">閉じる</button></div>
+    <p class="addhint" id="acount">選び終わったら「閉じる」。続けて何回でも追加できます。</p>
+    <div class="picklist">
+      <label class="btn" for="file" style="flex-direction:column;height:auto;min-height:58px;padding:6px 8px">ギャラリーから選ぶ<small>まとめて選べます（選べない時は下の方法で）</small></label>
+      <label class="btn" for="file2" style="flex-direction:column;height:auto;min-height:58px;padding:6px 8px">ファイルから選ぶ<small>1枚目を長押しすると複数選択になります</small></label>
+      <label class="btn" for="file3" style="flex-direction:column;height:auto;min-height:58px;padding:6px 8px">フォルダごと読み込む<small>フォルダの写真を名前順で全部入れます</small></label>
+    </div>
   </div>
   <div class="sheet" id="esheet" hidden>
     <div class="shd"><b>動画に書き出し</b><button id="eclose" class="okb mini">閉じる</button></div>
@@ -165,7 +177,7 @@ input[type=file]{display:none}
     <button class="tg" id="bMode"><small>くり返し</small><b>ループ</b></button>
     <button class="tg" id="bAsp"><small>画面の形</small><b>16:9 横</b></button>
     <button class="tg" id="bFit"><small>写真の収め方</small><b>いっぱい</b></button>
-    <label class="btn add" for="file2">＋ 写真追加</label>
+    <button class="add" id="bAdd">＋ 写真追加</button>
     <button id="bSort" disabled>並べ替え</button>
     <button class="go" id="go" disabled></button>
     <label class="btn bgm wide2" for="bfile" id="bname">♪ 音楽を選ぶ</label>
@@ -188,7 +200,8 @@ input[type=file]{display:none}
   </div>
 </div>
 <input type="file" id="file" accept="image/*" multiple>
-<input type="file" id="file2" accept="image/*" multiple>
+<input type="file" id="file2" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.bmp,.avif" multiple>
+<input type="file" id="file3" webkitdirectory multiple>
 <input type="file" id="bfile" accept="audio/*,video/*">
 <audio id="bgm" loop preload="auto"></audio>
 </div>
@@ -200,24 +213,32 @@ const $=id=>document.getElementById(id);
 const cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage'),note=$('note'),bgm=$('bgm');
 const ZM=0.12; // ズーム量（1枚の間に12%寄る）
 const DURS=[0.5,1,1.5,2,2.5,3,4,5,6,8,10,15];
-const ASP={'16:9':{r:[16,9],t:'16:9 横'},'9:16':{r:[9,16],t:'9:16 縦'},'1:1':{r:[1,1],t:'1:1 正方形'},'4:5':{r:[4,5],t:'4:5 縦長'}};
-const set={dur:3,tr:'dis',zoom:true,mode:'loop',asp:'16:9',fit:'cover',vol:1,q:'1080',rep:'1'};
-try{Object.assign(set,JSON.parse(localStorage.getItem('pslide_set')||'{}'))}catch(e){}
+const ASP={auto:{t:'写真に合わせる',d:'縦と横が混ざっていたら両方が収まる広さに'},'1:1':{r:[1,1],t:'1:1 正方形'},'16:9':{r:[16,9],t:'16:9 横'},'9:16':{r:[9,16],t:'9:16 縦'},'4:5':{r:[4,5],t:'4:5 縦長'},
+  fold:{r:[1968,2184],t:'Fold7 開いた画面',d:'内側の画面いっぱい（1968×2184 の比率）'},cover:{r:[1080,2520],t:'Fold7 閉じた画面',d:'外側の画面いっぱい（21:9 の縦）'}};
+const set={v:2,dur:3,tr:'dis',zoom:true,mode:'loop',asp:'auto',fit:'contain',vol:1,q:'1080',rep:'1'};
+try{const o=JSON.parse(localStorage.getItem('pslide_set')||'{}');if(o.v!==2){delete o.asp;delete o.fit}Object.assign(set,o,{v:2});if(!ASP[set.asp])set.asp='auto'}catch(e){}
 const saveSet=()=>{try{localStorage.setItem('pslide_set',JSON.stringify(set))}catch(e){}};
 let photos=[],nextId=1,playing=false,t=0,last=0,dirty=true,busy=false,cancelReq=false;
 let aFile=null,bUrl=null;
 
+const col=new Intl.Collator('ja',{numeric:true});
 const fmt=s=>{if(s==null||!isFinite(s))return'--';const m=Math.floor(s/60),r=s-m*60;return m+':'+(r<10?'0':'')+r.toFixed(1)};
 // ===== 並び（ループ：1→N、バウンド：1→N→…→2 を繰り返す。戻りは逆再生なのでズームも戻る） =====
 function seq(){const n=photos.length,s=[];for(let i=0;i<n;i++)s.push([i,1]);if(set.mode==='bounce'&&n>2)for(let i=n-2;i>=1;i--)s.push([i,-1]);return s}
 const X=()=>set.tr==='cut'?0:Math.min(1,set.dur*0.35); // ディゾルブの長さ
 const period=()=>seq().length*set.dur;
-function outSize(q){const short=q==='720'?720:1080,[a,b]=ASP[set.asp].r;return a>=b?[Math.round(short*a/b/2)*2,short]:[short,Math.round(short*b/a/2)*2]}
+// 「写真に合わせる」：全部同じ形ならその形、縦横が混ざっていたら長辺をそろえて全部が収まる広さ
+function ratio(){if(set.asp!=='auto'){const[a,b]=ASP[set.asp].r;return a/b}
+  if(!photos.length)return 16/9;const r0=photos[0].r;if(photos.every(p=>Math.abs(p.r/r0-1)<0.02))return r0;
+  let mw=0,mh=0;for(const p of photos){const w=p.r>=1?1:p.r,h=p.r>=1?1/p.r:1;mw=Math.max(mw,w);mh=Math.max(mh,h)}return mw/mh}
+const shapeKey=()=>set.asp+':'+ratio().toFixed(4);
+function outSize(q){const short=q==='720'?720:1080,R=Math.max(9/21,Math.min(21/9,ratio()));return R>=1?[Math.round(short*R/2)*2,short]:[short,Math.round(short/R/2)*2]}
+const ratioText=()=>{const[W,H]=outSize('1080');if(set.asp==='auto'&&photos.length>1&&!photos.every(p=>Math.abs(p.r/photos[0].r-1)<0.02)&&Math.abs(W/H-1)<0.01)return '1:1';const g=(a,b)=>b?g(b,a%b):a;let a=W,b=H;const d=g(a,b);a/=d;b/=d;return a<=32&&b<=32?a+':'+b:(W/H).toFixed(2)+':1'};
 function where(tt){const s=seq();if(!s.length)return null;const D=set.dur,P=s.length*D;tt=((tt%P)+P)%P;const k=Math.min(s.length-1,Math.floor(tt/D));return{s,k,loc:tt-k*D,D,P}}
 
 // ===== 写真の画像（必要な分だけ書き出しサイズで読み込み、使わないものは捨てる） =====
 const cache=new Map();let lq=Promise.resolve();const MAXC=8;
-const ckey=ph=>ph.id+'|'+set.asp+'|'+set.fit;
+const ckey=ph=>ph.id+'|'+shapeKey()+'|'+set.fit;
 function needDims(ph){const[W,H]=outSize('1080'),r=ph.r;const s=(set.fit==='cover'?Math.max(W/r,H):Math.min(W/r,H))*(1+ZM);let w=r*s,h=s;const cap=9e6;if(w*h>cap){const k=Math.sqrt(cap/(w*h));w*=k;h*=k}return[Math.max(2,Math.round(w)),Math.max(2,Math.round(h))]}
 function ensure(ph){const k=ckey(ph);let e=cache.get(k);
   if(!e){e={bm:null,used:0,dead:false};const[w,h]=needDims(ph);
@@ -277,20 +298,22 @@ function keepPos(change){const w=where(t);let id=null,frac=0,dir=1;if(w){const[i
 function paint(){
   const b=(id,v,cls)=>{const e=$(id);e.querySelector('b').textContent=v;e.classList.toggle('on',cls==='on');e.classList.toggle('alt',cls==='alt')};
   b('bDur',set.dur+'秒');b('bTr',set.tr==='cut'?'カット':'ディゾルブ',set.tr==='cut'?'':'on');b('bZoom',set.zoom?'オン':'オフ',set.zoom?'on':'');
-  b('bMode',set.mode==='bounce'?'⇄ バウンド':'↻ ループ',set.mode==='bounce'?'alt':'on');b('bAsp',ASP[set.asp].t);b('bFit',set.fit==='cover'?'いっぱい':'全体を表示');
+  b('bMode',set.mode==='bounce'?'⇄ バウンド':'↻ ループ',set.mode==='bounce'?'alt':'on');b('bAsp',set.asp==='auto'?'自動 '+(photos.length?ratioText():''):({'1:1':'1:1 正方形',fold:'Fold7 内',cover:'Fold7 外'}[set.asp]||ASP[set.asp].t));b('bFit',set.fit==='cover'?'いっぱい':'全体を表示');
   const has=photos.length>0;$('go').disabled=!has;$('bSort').disabled=!has;$('exp').disabled=!has||busy;stage.classList.toggle('has',has);
   $('bvol').value=set.vol;bgm.volume=set.vol;
+  const sk=shapeKey();if(sk!==lastShape){lastShape=sk;clearCache();resizeCv()}
 }
+let lastShape='';
 // 選択パネル（Androidの標準の選択画面を使わない）
-function pick(title,opts,cur,fn){$('pickT').textContent=title;$('pickL').innerHTML=opts.map((o,i)=>'<button type="button" data-i="'+i+'"'+(o.v===cur?' class="sel"':'')+'>'+o.t+'</button>').join('');
-  $('pickL').onclick=e=>{const x=e.target.closest('[data-i]');if(!x)return;fn(opts[+x.dataset.i].v);$('pick').hidden=true};$('esheet').hidden=true;$('pick').hidden=false}
+function pick(title,opts,cur,fn){$('pickT').textContent=title;$('pickL').innerHTML=opts.map((o,i)=>'<button type="button" data-i="'+i+'"'+(o.v===cur?' class="sel"':'')+'>'+o.t+(o.d?'<small>'+o.d+'</small>':'')+'</button>').join('');
+  $('pickL').onclick=e=>{const x=e.target.closest('[data-i]');if(!x)return;fn(opts[+x.dataset.i].v);$('pick').hidden=true};$('esheet').hidden=true;$('asheet').hidden=true;$('pick').hidden=false}
 $('pickX').onclick=()=>{$('pick').hidden=true};
 $('bDur').onclick=()=>{if(busy)return;pick('1枚の表示時間',DURS.map(d=>({v:d,t:d+'秒'})),set.dur,v=>{keepPos(()=>{set.dur=v});saveSet();paint()})};
 $('bTr').onclick=()=>{if(busy)return;set.tr=set.tr==='cut'?'dis':'cut';dirty=true;saveSet();paint()};
 $('bZoom').onclick=()=>{if(busy)return;set.zoom=!set.zoom;dirty=true;saveSet();paint()};
 $('bMode').onclick=()=>{if(busy)return;keepPos(()=>{set.mode=set.mode==='bounce'?'loop':'bounce'});saveSet();paint();
   note.textContent=set.mode==='bounce'?'バウンド：最後まで行ったら逆再生で1枚目まで戻り、また進みます。':'ループ：最後まで行ったら1枚目に戻ってくり返します。'};
-$('bAsp').onclick=()=>{if(busy)return;pick('画面の形（書き出しも同じ形）',Object.keys(ASP).map(k=>({v:k,t:ASP[k].t})),set.asp,v=>{set.asp=v;clearCache();resizeCv();saveSet();paint()})};
+$('bAsp').onclick=()=>{if(busy)return;pick('画面の形（書き出しも同じ形）',Object.keys(ASP).map(k=>({v:k,t:ASP[k].t+(k==='auto'&&photos.length?'（今は '+(set.asp==='auto'?ratioText():'')+'）':''),d:ASP[k].d})),set.asp,v=>{set.asp=v;saveSet();paint();note.textContent='画面の形：'+(v==='auto'?'写真に合わせる（'+ratioText()+'）':ASP[v].t)+'。書き出しも同じ形になります。'})};
 $('bFit').onclick=()=>{if(busy)return;set.fit=set.fit==='cover'?'contain':'cover';clearCache();dirty=true;saveSet();paint();
   note.textContent=set.fit==='cover'?'いっぱい：画面に合わせて写真のはみ出す部分を切ります。':'全体を表示：写真全体を見せ、余白は黒にします。'};
 $('bvol').oninput=()=>{set.vol=+$('bvol').value;bgm.volume=set.vol;saveSet()};
@@ -298,7 +321,8 @@ $('bvol').oninput=()=>{set.vol=+$('bvol').value;bgm.volume=set.vol;saveSet()};
 // ===== 写真の読み込み =====
 let loading=false;
 async function addFiles(list){
-  const files=[...list].filter(f=>!f.type||f.type.startsWith('image/'));if(!files.length)return;
+  const IMG=/\.(jpe?g|png|webp|heic|heif|gif|bmp|avif)$/i;const files=[...list].filter(f=>(f.type&&f.type.startsWith('image/'))||IMG.test(f.name));
+  if(!files.length){note.textContent='写真が見つかりませんでした。';return}
   loading=true;let ok=0,ng=0;const first=!photos.length;
   for(const f of files){
     note.textContent='写真を読み込み中… '+(ok+ng+1)+' / '+files.length;
@@ -311,10 +335,14 @@ async function addFiles(list){
     }catch(e){ng++}
   }
   loading=false;renderStrip();paint();dirty=true;if(first){t=0;resizeCv()}
-  note.textContent=ok+'枚読み込みました'+(ng?'（'+ng+'枚は開けませんでした）':'')+'。「並べ替え」で順番を変えられます。';
+  note.textContent=ok+'枚読み込みました（全部で'+photos.length+'枚）'+(ng?'（'+ng+'枚は開けませんでした）':'')+'。「並べ替え」で順番を変えられます。';
+  $('acount').textContent='今 '+photos.length+'枚。続けて追加するか「閉じる」。'+(ng?'（'+ng+'枚は開けませんでした）':'');
 }
 $('file').onchange=e=>{const f=e.target.files;if(f&&f.length)addFiles(f);e.target.value=''};
 $('file2').onchange=$('file').onchange;
+$('file3').onchange=e=>{const f=[...(e.target.files||[])];e.target.value='';if(!f.length)return;f.sort((a,b)=>col.compare(a.webkitRelativePath||a.name,b.webkitRelativePath||b.name));addFiles(f)};
+function openAdd(){if(busy)return;$('pick').hidden=true;$('esheet').hidden=true;$('acount').textContent=photos.length?'今 '+photos.length+'枚。続けて追加できます。':'選び終わったら「閉じる」。続けて何回でも追加できます。';$('asheet').hidden=false}
+$('bAdd').onclick=openAdd;$('empty').onclick=openAdd;$('aclose').onclick=()=>{$('asheet').hidden=true};
 function renderStrip(){const s=$('strip');
   if(!photos.length){s.innerHTML='<div class="none">まだ写真がありません</div>';return}
   s.innerHTML=photos.map((p,i)=>'<div class="th'+(i===curI?' cur':'')+'" data-i="'+i+'"><img src="'+p.thumb+'" alt=""><i>'+(i+1)+'</i></div>').join('')}
@@ -338,7 +366,6 @@ $('sDel').onclick=()=>{const d=$('sDel');if(sel<0)return;
   const p=photos[sel];changed(()=>{photos.splice(sel,1)});URL.revokeObjectURL(p.thumb);sel=Math.min(sel,photos.length-1);
   if(!photos.length){$('sorter').hidden=true;t=0;curI=-1}renderGrid()};
 $('sRev').onclick=()=>{const id=photos[sel]?.id;changed(()=>photos.reverse());sel=photos.findIndex(p=>p.id===id);renderGrid()};
-const col=new Intl.Collator('ja',{numeric:true});
 $('sName').onclick=()=>{const id=photos[sel]?.id;changed(()=>photos.sort((a,b)=>col.compare(a.name,b.name)));sel=photos.findIndex(p=>p.id===id);renderGrid()};
 $('sDate').onclick=()=>{const id=photos[sel]?.id;changed(()=>photos.sort((a,b)=>a.lm-b.lm||col.compare(a.name,b.name)));sel=photos.findIndex(p=>p.id===id);renderGrid()};
 // 長押しでつかんで移動
@@ -377,13 +404,13 @@ $('repAudio').onclick=()=>setRep('audio');
 RS.addEventListener('scroll',()=>{if(repIgnore)return;clearTimeout(repT);repT=setTimeout(()=>{setRep(Math.max(1,Math.min(30,Math.round(RS.scrollLeft/ITEM)+1)))},120)});
 RS.onclick=e=>{const b=e.target.closest('[data-n]');if(!b)return;setRep(+b.dataset.n);repScrollTo(+b.dataset.n,true)};
 $('qlist').onclick=e=>{const b=e.target.closest('[data-v]');if(!b)return;set.q=b.dataset.v;saveSet();repPaint()};
-$('exp').onclick=()=>{if(busy){cancelReq=true;return}$('pick').hidden=true;$('esheet').hidden=false;repPaint();requestAnimationFrame(()=>repScrollTo(lastNum,false))};
+$('exp').onclick=()=>{if(busy){cancelReq=true;return}$('pick').hidden=true;$('asheet').hidden=true;$('esheet').hidden=false;repPaint();requestAnimationFrame(()=>repScrollTo(lastNum,false))};
 $('eclose').onclick=()=>{$('esheet').hidden=true};
 $('estart').onclick=()=>{if(set.rep==='audio'&&!aFile){note.textContent='「音声合わせ」で書き出すには、先に音楽を選んでください。';return}$('esheet').hidden=true;exportNow()};
 
 // ===== 書き出し（WebCodecs＋MP4：実時間を待たずに作る） =====
 async function pickVideoCfg(W,H,F){const br=Math.max(6e6,Math.round(W*H*F*0.16));
-  for(const codec of ['avc1.640028','avc1.4d0028','avc1.42e028','avc1.640033','avc1.42e01f']){const c={codec,width:W,height:H,bitrate:br,framerate:F,avc:{format:'avc'}};
+  const big=W*H>2097152;for(const codec of big?['avc1.640033','avc1.4d0033','avc1.640034','avc1.42e033']:['avc1.640028','avc1.4d0028','avc1.42e028','avc1.640033','avc1.42e01f']){const c={codec,width:W,height:H,bitrate:br,framerate:F,avc:{format:'avc'}};
     try{const r=await VideoEncoder.isConfigSupported(c);if(r.supported)return c}catch(e){}}return null}
 async function pickAudioCfg(){for(const codec of ['mp4a.40.2','opus']){const c={codec,sampleRate:48000,numberOfChannels:2,bitrate:192000};
     try{const r=await AudioEncoder.isConfigSupported(c);if(r.supported)return c}catch(e){}}return null}
@@ -452,7 +479,7 @@ stage.addEventListener('click',e=>{if(!photos.length)return;if(e.target===cv||e.
    if(document.fullscreenElement){document.exitFullscreen().catch(()=>{});return}
    if(stage.classList.contains('fs')){stage.classList.remove('fs');return}
    if(!$('sorter').hidden){$('sortX').onclick();return}
-   const open=['pick','esheet'].find(id=>!$(id).hidden);if(open){$(open).hidden=true;return}
+   const open=['pick','esheet','asheet'].find(id=>!$(id).hidden);if(open){$(open).hidden=true;return}
    note.textContent='戻る操作は無効にしています（アプリを閉じるときはホームボタンで）。'})}
 document.addEventListener('visibilitychange',()=>{last=performance.now();if(document.hidden&&playing)play(false)});
 
