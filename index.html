@@ -177,9 +177,10 @@ input[type=file]{display:none}
     <button class="tg" id="bDur"><small>表示時間</small><b>3秒</b></button>
     <button class="tg" id="bTr"><small>つなぎ</small><b>ディゾルブ</b></button>
     <button class="tg" id="bZoom"><small>ゆっくりズーム</small><b>オン</b></button>
+    <button class="tg" id="bRot"><small>回転</small><b>オフ</b></button>
     <button class="tg" id="bAsp"><small>画面の形</small><b>16:9 横</b></button>
     <button class="tg" id="bFit"><small>写真の収め方</small><b>いっぱい</b></button>
-    <button class="add wide2" id="bAdd">＋ 写真追加</button>
+    <button class="add" id="bAdd">＋ 写真追加</button>
     <button id="bSort" disabled>並べ替え</button>
     <button class="go" id="go" disabled></button>
     <label class="btn bgm wide2" for="bfile" id="bname">♪ 音楽を選ぶ</label>
@@ -213,11 +214,11 @@ input[type=file]{display:none}
 {
 const $=id=>document.getElementById(id);
 const cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage'),note=$('note'),bgm=$('bgm');
-const ZM=0.12; // ズーム量（1枚の間に12%寄る）
+const ZM=0.12,ROT=2.5*Math.PI/180; // 回転：1枚の間に2.5°だけ、写真ごとに時計回り／反時計回りを交互に // ズーム量（1枚の間に12%寄る）
 const DURS=[0.5,1,1.5,2,2.5,3,4,5,6,8,10,15];
 const ASP={auto:{t:'写真に合わせる',d:'縦と横が混ざっていたら両方が収まる広さに'},'1:1':{r:[1,1],t:'1:1 正方形'},'16:9':{r:[16,9],t:'16:9 横'},'9:16':{r:[9,16],t:'9:16 縦'},'4:5':{r:[4,5],t:'4:5 縦長'},
   fold:{r:[1968,2184],t:'Fold7 開いた画面',d:'内側の画面いっぱい（1968×2184 の比率）'},cover:{r:[1080,2520],t:'Fold7 閉じた画面',d:'外側の画面いっぱい（21:9 の縦）'}};
-const set={v:2,dur:3,tr:'dis',zoom:true,mode:'loop',asp:'auto',fit:'contain',vol:1,q:'1080',rep:'1'};
+const set={v:2,dur:3,tr:'dis',zoom:true,rot:false,mode:'loop',asp:'auto',fit:'contain',vol:1,q:'1080',rep:'1'};
 try{const o=JSON.parse(localStorage.getItem('pslide_set')||'{}');if(o.v!==2){delete o.asp;delete o.fit}Object.assign(set,o,{v:2});if(!ASP[set.asp])set.asp='auto'}catch(e){}
 const saveSet=()=>{try{localStorage.setItem('pslide_set',JSON.stringify(set))}catch(e){}};
 let photos=[],nextId=1,playing=false,t=0,last=0,dirty=true,busy=false,cancelReq=false;
@@ -241,7 +242,7 @@ function where(tt){const s=seq();if(!s.length)return null;const D=set.dur,P=s.le
 // ===== 写真の画像（必要な分だけ書き出しサイズで読み込み、使わないものは捨てる） =====
 const cache=new Map();let lq=Promise.resolve();const MAXC=8;
 const ckey=ph=>ph.id+'|'+shapeKey()+'|'+set.fit;
-function needDims(ph){const[W,H]=outSize('1080'),r=ph.r;const s=(set.fit==='cover'?Math.max(W/r,H):Math.min(W/r,H))*(1+ZM);let w=r*s,h=s;const cap=9e6;if(w*h>cap){const k=Math.sqrt(cap/(w*h));w*=k;h*=k}return[Math.max(2,Math.round(w)),Math.max(2,Math.round(h))]}
+function needDims(ph){const[W,H]=outSize('1080'),r=ph.r;const s=(set.fit==='cover'?Math.max(W/r,H):Math.min(W/r,H))*(1+ZM)*(set.fit==='cover'?1.1:1);let w=r*s,h=s;const cap=9e6;if(w*h>cap){const k=Math.sqrt(cap/(w*h));w*=k;h*=k}return[Math.max(2,Math.round(w)),Math.max(2,Math.round(h))]}
 function ensure(ph){const k=ckey(ph);let e=cache.get(k);
   if(!e){e={bm:null,used:0,dead:false};const[w,h]=needDims(ph);
     e.p=lq=lq.then(async()=>{if(e.dead)return;try{e.bm=await createImageBitmap(ph.file,{resizeWidth:w,resizeHeight:h,resizeQuality:'high'})}catch(err){e.err=true}
@@ -264,7 +265,12 @@ function drawAt(c,W,H,tt,get){
   c.globalCompositeOperation='source-over';c.globalAlpha=1;c.fillStyle='#000';c.fillRect(0,0,W,H);
   const one=(slot,lt,alpha,bm)=>{const[i,dir]=s[slot],ph=photos[i];let q=(lt+x)/(D+x);q=Math.max(0,Math.min(1,q)); // バウンドの戻りでもズームは常にイン
     const z=set.zoom?1+ZM*q:1,sc=(set.fit==='cover'?Math.max(W/ph.r,H):Math.min(W/ph.r,H))*z,dw=ph.r*sc,dh=sc;
-    c.globalAlpha=alpha;c.drawImage(bm,(W-dw)/2,(H-dh)/2,dw,dh)};
+    c.globalAlpha=alpha;
+    if(set.rot){const sg=slot%2?-1:1,ang=sg*ROT*(q-0.5);
+      // 「いっぱい」の時は回転で角に黒が出ないよう少しだけ大きく
+      const k=set.fit==='cover'?Math.cos(Math.abs(ang))+Math.sin(Math.abs(ang))*Math.max(W/H,H/W):1;
+      c.save();c.translate(W/2,H/2);c.rotate(ang);c.drawImage(bm,-dw*k/2,-dh*k/2,dw*k,dh*k);c.restore()}
+    else c.drawImage(bm,(W-dw)/2,(H-dh)/2,dw,dh)};
   if(a>0&&b1){c.globalCompositeOperation='lighter';one(k,loc,1-a,b0);one(k2,loc-D,a,b1);c.globalCompositeOperation='source-over'}
   else one(k,loc,1,b0);
   c.globalAlpha=1;return{i:a>0.5&&b1?i1:i0,k,ok:true};
@@ -300,7 +306,7 @@ function keepPos(change){const w=where(t);let id=null,frac=0,dir=1;if(w){const[i
 // ===== ボタン表示 =====
 function paint(){
   const b=(id,v,cls)=>{const e=$(id);e.querySelector('b').textContent=v;e.classList.toggle('on',cls==='on');e.classList.toggle('alt',cls==='alt')};
-  b('bDur',set.dur+'秒');b('bTr',set.tr==='cut'?'カット':'ディゾルブ',set.tr==='cut'?'':'on');b('bZoom',set.zoom?'オン':'オフ',set.zoom?'on':'');
+  b('bDur',set.dur+'秒');b('bTr',set.tr==='cut'?'カット':'ディゾルブ',set.tr==='cut'?'':'on');b('bZoom',set.zoom?'オン':'オフ',set.zoom?'on':'');b('bRot',set.rot?'オン':'オフ',set.rot?'on':'');
   {const m=$('bMode'),bo=set.mode==='bounce';m.innerHTML=bo?ICON_PP:ICON_FW;m.title=bo?'バウンド（往復）':'ループ（一方向）';m.classList.toggle('fwd',!bo)}b('bAsp',set.asp==='auto'?'自動 '+(photos.length?ratioText():''):({'1:1':'1:1 正方形',fold:'Fold7 内',cover:'Fold7 外'}[set.asp]||ASP[set.asp].t));b('bFit',set.fit==='cover'?'いっぱい':'全体を表示');
   const has=photos.length>0;$('go').disabled=!has;$('bSort').disabled=!has;$('exp').disabled=!has||busy;stage.classList.toggle('has',has);
   $('bvol').value=set.vol;bgm.volume=set.vol;
@@ -314,6 +320,7 @@ $('pickX').onclick=()=>{$('pick').hidden=true};
 $('bDur').onclick=()=>{if(busy)return;pick('1枚の表示時間',DURS.map(d=>({v:d,t:d+'秒'})),set.dur,v=>{keepPos(()=>{set.dur=v});saveSet();paint()})};
 $('bTr').onclick=()=>{if(busy)return;set.tr=set.tr==='cut'?'dis':'cut';dirty=true;saveSet();paint()};
 $('bZoom').onclick=()=>{if(busy)return;set.zoom=!set.zoom;dirty=true;saveSet();paint()};
+$('bRot').onclick=()=>{if(busy)return;set.rot=!set.rot;clearCache();dirty=true;saveSet();paint();if(set.rot)note.textContent='回転：写真ごとに時計回り・反時計回りを交互に、じわーっと少しだけ回ります。'};
 $('bMode').onclick=()=>{if(busy)return;keepPos(()=>{set.mode=set.mode==='bounce'?'loop':'bounce'});saveSet();paint();
   note.textContent=set.mode==='bounce'?'バウンド：最後まで行ったら逆の順番で1枚目まで戻り、また進みます（ズームはずっとイン）。':'ループ：最後まで行ったら1枚目に戻ってくり返します。'};
 $('bAsp').onclick=()=>{if(busy)return;pick('画面の形（書き出しも同じ形）',Object.keys(ASP).map(k=>({v:k,t:ASP[k].t+(k==='auto'&&photos.length?'（今は '+(set.asp==='auto'?ratioText():'')+'）':''),d:ASP[k].d})),set.asp,v=>{set.asp=v;saveSet();paint();note.textContent='画面の形：'+(v==='auto'?'写真に合わせる（'+ratioText()+'）':ASP[v].t)+'。書き出しも同じ形になります。'})};
