@@ -31,7 +31,10 @@ h1{font-size:16px;margin:0 2px;font-weight:700;flex:none}
 .empty b{display:block;color:var(--ink);font-size:18px;margin-bottom:4px}
 .stage.has .empty{display:none}
 /* 写真の帯 */
-.strip{display:flex;gap:6px;overflow-x:auto;height:58px;flex:none;padding:3px 2px;scrollbar-width:none;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.srow{display:grid;grid-template-columns:minmax(0,1fr) 64px;gap:8px;align-items:center;flex:none}
+.mode{height:58px;border-color:var(--go);padding:0}
+.mode.fwd{background:#2b2e36}
+.strip{display:flex;gap:6px;overflow-x:auto;height:58px;flex:none;touch-action:none;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;padding:3px 2px;scrollbar-width:none;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .strip::-webkit-scrollbar{display:none}
 .strip .th{position:relative;flex:0 0 50px;height:50px;border-radius:8px;overflow:hidden;border:2px solid transparent;cursor:pointer;background:#000}
 .strip .th img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
@@ -164,7 +167,7 @@ input[type=file]{display:none}
     <div class="qlist" id="qlist"><button type="button" data-v="720">標準（720p）</button><button type="button" data-v="1080">高め（1080p）</button></div>
     <button id="estart" class="estart">書き出し開始</button>
   </div>
-  <div class="strip" id="strip"></div>
+  <div class="srow"><div class="strip" id="strip"></div><button class="mode" id="bMode" aria-label="くり返し"></button></div>
   <div class="times">
     <div><small>写真</small><span id="tNo">--</span></div>
     <div><small>今</small><span id="tNow">--</span></div>
@@ -174,10 +177,9 @@ input[type=file]{display:none}
     <button class="tg" id="bDur"><small>表示時間</small><b>3秒</b></button>
     <button class="tg" id="bTr"><small>つなぎ</small><b>ディゾルブ</b></button>
     <button class="tg" id="bZoom"><small>ゆっくりズーム</small><b>オン</b></button>
-    <button class="tg" id="bMode"><small>くり返し</small><b>ループ</b></button>
     <button class="tg" id="bAsp"><small>画面の形</small><b>16:9 横</b></button>
     <button class="tg" id="bFit"><small>写真の収め方</small><b>いっぱい</b></button>
-    <button class="add" id="bAdd">＋ 写真追加</button>
+    <button class="add wide2" id="bAdd">＋ 写真追加</button>
     <button id="bSort" disabled>並べ替え</button>
     <button class="go" id="go" disabled></button>
     <label class="btn bgm wide2" for="bfile" id="bname">♪ 音楽を選ぶ</label>
@@ -223,7 +225,7 @@ let aFile=null,bUrl=null;
 
 const col=new Intl.Collator('ja',{numeric:true});
 const fmt=s=>{if(s==null||!isFinite(s))return'--';const m=Math.floor(s/60),r=s-m*60;return m+':'+(r<10?'0':'')+r.toFixed(1)};
-// ===== 並び（ループ：1→N、バウンド：1→N→…→2 を繰り返す。戻りは逆再生なのでズームも戻る） =====
+// ===== 並び（ループ：1→N、バウンド：1→N→…→2 を繰り返す。ズームはどちらも常にイン） =====
 function seq(){const n=photos.length,s=[];for(let i=0;i<n;i++)s.push([i,1]);if(set.mode==='bounce'&&n>2)for(let i=n-2;i>=1;i--)s.push([i,-1]);return s}
 const X=()=>set.tr==='cut'?0:Math.min(1,set.dur*0.35); // ディゾルブの長さ
 const period=()=>seq().length*set.dur;
@@ -260,7 +262,7 @@ function drawAt(c,W,H,tt,get){
   const b0=get(i0),b1=a>0?get(i1):null;
   if(!b0)return{i:i0,k,ok:false};
   c.globalCompositeOperation='source-over';c.globalAlpha=1;c.fillStyle='#000';c.fillRect(0,0,W,H);
-  const one=(slot,lt,alpha,bm)=>{const[i,dir]=s[slot],ph=photos[i];let q=(lt+x)/(D+x);q=Math.max(0,Math.min(1,q));if(dir<0)q=1-q;
+  const one=(slot,lt,alpha,bm)=>{const[i,dir]=s[slot],ph=photos[i];let q=(lt+x)/(D+x);q=Math.max(0,Math.min(1,q)); // バウンドの戻りでもズームは常にイン
     const z=set.zoom?1+ZM*q:1,sc=(set.fit==='cover'?Math.max(W/ph.r,H):Math.min(W/ph.r,H))*z,dw=ph.r*sc,dh=sc;
     c.globalAlpha=alpha;c.drawImage(bm,(W-dw)/2,(H-dh)/2,dw,dh)};
   if(a>0&&b1){c.globalCompositeOperation='lighter';one(k,loc,1-a,b0);one(k2,loc-D,a,b1);c.globalCompositeOperation='source-over'}
@@ -269,18 +271,19 @@ function drawAt(c,W,H,tt,get){
 }
 
 // ===== プレビュー =====
-let curI=-1;
+let curI=-1,scrub=null;
 function resizeCv(){const[W,H]=outSize('1080');if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H}dirty=true}
 function loop(now){
   const dt=Math.min(0.1,(now-last)/1000);last=now;
-  if(playing&&!busy){t+=dt;dirty=true}
+  if(playing&&!busy&&!scrub){t+=dt;dirty=true}
   if(photos.length&&!busy){prefetch(t);if(dirty){const r=drawAt(ctx,cv.width,cv.height,t,bmOf);if(r&&r.ok)dirty=false;if(r)setCur(r.i)}}
   if(!busy)uiTimes();
   requestAnimationFrame(loop);
 }
 function uiTimes(){const P=period();$('tNo').textContent=photos.length?(curI+1)+' / '+photos.length+'枚':'--';$('tNow').textContent=photos.length?fmt(((t%P)+P)%P):'--';$('tCyc').textContent=photos.length?fmt(P):'--'}
 function setCur(i){if(i===curI)return;curI=i;const s=$('strip');[...s.children].forEach((c,j)=>c.classList.toggle('cur',j===i));
-  const el=s.children[i];if(el&&playing){const l=el.offsetLeft,r=l+el.offsetWidth;if(l<s.scrollLeft||r>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+el.offsetWidth/2,behavior:'smooth'})}}
+  const el=s.children[i];if(el&&playing&&!scrub){const l=el.offsetLeft,r=l+el.offsetWidth;if(l<s.scrollLeft||r>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+el.offsetWidth/2,behavior:'smooth'})}}
+const ICON_PP='<svg viewBox="0 0 48 28" width="44" height="26" aria-hidden="true"><path d="M8 9h30m-6-5 6 5-6 5M40 19H10m6-5-6 5 6 5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',ICON_FW='<svg viewBox="0 0 48 28" width="44" height="26" aria-hidden="true"><path d="M8 18h30m-6-5 6 5-6 5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M38 9C30 1 16 1 9 8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round"/><path d="M8 3v6h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const IC_PLAY='<svg class="gi" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.2v11.6c0 .6.7 1 1.2.7l9-5.8c.5-.3.5-1 0-1.3l-9-5.8C6.7 3.2 6 3.6 6 4.2z" fill="currentColor"/></svg>',IC_PAUSE='<svg class="gi" viewBox="0 0 20 20" aria-hidden="true"><rect x="5.5" y="4" width="2.4" height="12" rx="1.2" fill="currentColor"/><rect x="12.1" y="4" width="2.4" height="12" rx="1.2" fill="currentColor"/></svg>';
 function setGo(){$('go').innerHTML=(playing?IC_PAUSE:IC_PLAY)+'<span>'+(playing?'停止':'再生')+'</span>';$('go').classList.toggle('on',playing)}
 function audSync(){if(!bUrl)return;const d=bgm.duration;if(d&&isFinite(d))bgm.currentTime=((t%d)+d)%d}
@@ -298,7 +301,7 @@ function keepPos(change){const w=where(t);let id=null,frac=0,dir=1;if(w){const[i
 function paint(){
   const b=(id,v,cls)=>{const e=$(id);e.querySelector('b').textContent=v;e.classList.toggle('on',cls==='on');e.classList.toggle('alt',cls==='alt')};
   b('bDur',set.dur+'秒');b('bTr',set.tr==='cut'?'カット':'ディゾルブ',set.tr==='cut'?'':'on');b('bZoom',set.zoom?'オン':'オフ',set.zoom?'on':'');
-  b('bMode',set.mode==='bounce'?'⇄ バウンド':'↻ ループ',set.mode==='bounce'?'alt':'on');b('bAsp',set.asp==='auto'?'自動 '+(photos.length?ratioText():''):({'1:1':'1:1 正方形',fold:'Fold7 内',cover:'Fold7 外'}[set.asp]||ASP[set.asp].t));b('bFit',set.fit==='cover'?'いっぱい':'全体を表示');
+  {const m=$('bMode'),bo=set.mode==='bounce';m.innerHTML=bo?ICON_PP:ICON_FW;m.title=bo?'バウンド（往復）':'ループ（一方向）';m.classList.toggle('fwd',!bo)}b('bAsp',set.asp==='auto'?'自動 '+(photos.length?ratioText():''):({'1:1':'1:1 正方形',fold:'Fold7 内',cover:'Fold7 外'}[set.asp]||ASP[set.asp].t));b('bFit',set.fit==='cover'?'いっぱい':'全体を表示');
   const has=photos.length>0;$('go').disabled=!has;$('bSort').disabled=!has;$('exp').disabled=!has||busy;stage.classList.toggle('has',has);
   $('bvol').value=set.vol;bgm.volume=set.vol;
   const sk=shapeKey();if(sk!==lastShape){lastShape=sk;clearCache();resizeCv()}
@@ -312,7 +315,7 @@ $('bDur').onclick=()=>{if(busy)return;pick('1枚の表示時間',DURS.map(d=>({v
 $('bTr').onclick=()=>{if(busy)return;set.tr=set.tr==='cut'?'dis':'cut';dirty=true;saveSet();paint()};
 $('bZoom').onclick=()=>{if(busy)return;set.zoom=!set.zoom;dirty=true;saveSet();paint()};
 $('bMode').onclick=()=>{if(busy)return;keepPos(()=>{set.mode=set.mode==='bounce'?'loop':'bounce'});saveSet();paint();
-  note.textContent=set.mode==='bounce'?'バウンド：最後まで行ったら逆再生で1枚目まで戻り、また進みます。':'ループ：最後まで行ったら1枚目に戻ってくり返します。'};
+  note.textContent=set.mode==='bounce'?'バウンド：最後まで行ったら逆の順番で1枚目まで戻り、また進みます（ズームはずっとイン）。':'ループ：最後まで行ったら1枚目に戻ってくり返します。'};
 $('bAsp').onclick=()=>{if(busy)return;pick('画面の形（書き出しも同じ形）',Object.keys(ASP).map(k=>({v:k,t:ASP[k].t+(k==='auto'&&photos.length?'（今は '+(set.asp==='auto'?ratioText():'')+'）':''),d:ASP[k].d})),set.asp,v=>{set.asp=v;saveSet();paint();note.textContent='画面の形：'+(v==='auto'?'写真に合わせる（'+ratioText()+'）':ASP[v].t)+'。書き出しも同じ形になります。'})};
 $('bFit').onclick=()=>{if(busy)return;set.fit=set.fit==='cover'?'contain':'cover';clearCache();dirty=true;saveSet();paint();
   note.textContent=set.fit==='cover'?'いっぱい：画面に合わせて写真のはみ出す部分を切ります。':'全体を表示：写真全体を見せ、余白は黒にします。'};
@@ -346,7 +349,16 @@ $('bAdd').onclick=openAdd;$('empty').onclick=openAdd;$('aclose').onclick=()=>{$(
 function renderStrip(){const s=$('strip');
   if(!photos.length){s.innerHTML='<div class="none">まだ写真がありません</div>';return}
   s.innerHTML=photos.map((p,i)=>'<div class="th'+(i===curI?' cur':'')+'" data-i="'+i+'"><img src="'+p.thumb+'" alt=""><i>'+(i+1)+'</i></div>').join('')}
-$('strip').onclick=e=>{const x=e.target.closest('[data-i]');if(!x||busy)return;const i=+x.dataset.i,s=seq();const k=s.findIndex(q=>q[0]===i);t=k*set.dur+(X()?X()*0.01:0);dirty=true;if(playing)audSync();setCur(i)};
+// 写真の帯：タップ／指を横にすべらせると、指の下の写真を表示（端に来たら帯が自動で流れる）
+function jumpTo(i){const s=seq(),k=s.findIndex(q=>q[0]===i);if(k<0)return;t=k*set.dur;dirty=true;setCur(i)}
+{const S=$('strip');
+ const at=x=>{const r=S.getBoundingClientRect(),el=document.elementFromPoint(Math.max(r.left+2,Math.min(r.right-2,x)),r.top+r.height/2),th=el&&el.closest&&el.closest('.th');if(th&&+th.dataset.i!==curI)jumpTo(+th.dataset.i)};
+ const edge=()=>{if(!scrub)return;const r=S.getBoundingClientRect(),x=scrub.x;let v=0;if(x<r.left+36)v=-Math.min(14,(r.left+36-x)/2+3);else if(x>r.right-36)v=Math.min(14,(x-(r.right-36))/2+3);
+   if(v){S.scrollLeft+=v;at(x)}scrub.raf=requestAnimationFrame(edge)};
+ S.addEventListener('pointerdown',e=>{if(busy||!photos.length)return;S.setPointerCapture(e.pointerId);scrub={x:e.clientX,raf:0};at(e.clientX);scrub.raf=requestAnimationFrame(edge)});
+ S.addEventListener('pointermove',e=>{if(!scrub)return;scrub.x=e.clientX;at(e.clientX)});
+ const end=()=>{if(!scrub)return;cancelAnimationFrame(scrub.raf);scrub=null;last=performance.now();if(playing)audSync()};
+ S.addEventListener('pointerup',end);S.addEventListener('pointercancel',end);}
 
 // ===== 並べ替え =====
 let sel=-1,pd=null;
